@@ -58,80 +58,76 @@ export async function searchFlights(input: SearchInput): Promise<FlightResult[]>
 
 async function excludeBasicEconomy(page: Page, debug = false): Promise<void> {
   const log = (msg: string) => { if (debug) appendFileSync("debug-scraper.log", `[filter] ${msg}\n`); };
-  log("Excluding basic economy via Bags filter (require 1 carry-on)...");
+  log("Excluding basic economy via class dropdown...");
 
-  // The "Bags" button is a standard clickable button in the filter bar
-  const bagsButton = page.locator('button[aria-label*="Bags"]').first();
-  const visible = await bagsButton.isVisible({ timeout: 5000 }).catch(() => false);
-  log(`Bags button visible: ${visible}`);
+  // From joshtkraus/google-flights-scraper: the combobox has a span inside
+  // with aria-label="Change seating class." — click THAT, not the combobox div
+  const seatSpan = page.locator('span[aria-label="Change seating class."], span[aria-label="Change seating class"]');
+  const spanVisible = await seatSpan.isVisible({ timeout: 3000 }).catch(() => false);
+  log(`span[aria-label="Change seating class."] visible: ${spanVisible}`);
 
-  if (!visible) {
-    log("Bags button not found");
-    return;
+  if (!spanVisible) {
+    // Try finding it via the combobox parent
+    const combobox = page.locator('[role="combobox"]:has-text("Economy")').first();
+    const cbVisible = await combobox.isVisible({ timeout: 3000 }).catch(() => false);
+    log(`Combobox visible: ${cbVisible}`);
+    if (cbVisible) {
+      // Try clicking the combobox's child span/button elements
+      const innerClicked = await page.evaluate(() => {
+        const cb = Array.from(document.querySelectorAll('[role="combobox"]'))
+          .find(el => el.textContent?.includes("Economy"));
+        if (!cb) return "combobox not found";
+        // Try every child element
+        const children = cb.querySelectorAll("span, div, i, svg");
+        for (const child of children) {
+          if ((child as HTMLElement).getBoundingClientRect().height > 0) {
+            (child as HTMLElement).click();
+            return `clicked child: ${child.tagName}.${child.className?.toString().slice(0, 30)}`;
+          }
+        }
+        return "no clickable children";
+      });
+      log(`Inner click result: ${innerClicked}`);
+      await page.waitForTimeout(1000);
+    }
+  } else {
+    await seatSpan.click();
+    await page.waitForTimeout(1000);
+    log("Clicked seat class span");
   }
 
-  await bagsButton.click();
-  await page.waitForTimeout(1000);
-
-  // Dump what appeared in the bags popup
-  const popupContent = await page.evaluate(() => {
-    const all = document.querySelectorAll("*");
-    return Array.from(all)
-      .filter(el => {
-        const rect = (el as HTMLElement).getBoundingClientRect();
-        return rect.height > 0 && rect.height < 50;
-      })
-      .filter(el => {
-        const text = el.textContent?.trim().toLowerCase() || "";
-        return text.includes("carry") || text.includes("checked") || text.includes("bag");
-      })
-      .filter(el => el.children.length === 0 || el.tagName === "BUTTON")
-      .slice(0, 15)
+  // Check if dropdown opened — look for visible options
+  const options = await page.evaluate(() => {
+    const items = document.querySelectorAll('[role="option"], li[data-value], [role="listbox"] li');
+    return Array.from(items)
+      .filter(el => (el as HTMLElement).getBoundingClientRect().height > 0)
       .map(el => ({
-        tag: el.tagName,
         text: el.textContent?.trim().slice(0, 50),
-        ariaLabel: el.getAttribute("aria-label"),
-        role: el.getAttribute("role"),
+        dataValue: el.getAttribute("data-value"),
+        ariaSelected: el.getAttribute("aria-selected"),
       }));
   });
-  log(`Bags popup elements: ${JSON.stringify(popupContent, null, 2)}`);
+  log(`Visible options after click: ${JSON.stringify(options)}`);
 
-  // Look for carry-on bag increment button
-  const carryOnInc = page.locator('button[aria-label*="carry-on" i][aria-label*="increase" i], button[aria-label*="more carry-on" i], button[aria-label*="Add a carry-on" i]').first();
-  const incVisible = await carryOnInc.isVisible({ timeout: 3000 }).catch(() => false);
-  log(`Carry-on increment button visible: ${incVisible}`);
-
-  if (incVisible) {
-    await carryOnInc.click();
-    await page.waitForTimeout(500);
-    log("Clicked carry-on increment");
-  } else {
-    // Try finding any increment/plus button near carry-on text
-    const allButtons = await page.evaluate(() => {
-      const buttons = document.querySelectorAll("button");
-      return Array.from(buttons)
-        .filter(b => b.getBoundingClientRect().height > 0)
-        .filter(b => {
-          const label = b.getAttribute("aria-label") || "";
-          return /carry|bag/i.test(label);
-        })
-        .map(b => ({
-          text: b.textContent?.trim().slice(0, 30),
-          ariaLabel: b.getAttribute("aria-label"),
-        }));
+  if (options.length > 0) {
+    // Look for "Economy" without "Basic" or "Economy (exclude Basic)"
+    const selected = await page.evaluate(() => {
+      const items = document.querySelectorAll('[role="option"], li[data-value], [role="listbox"] li');
+      for (const item of items) {
+        if ((item as HTMLElement).getBoundingClientRect().height === 0) continue;
+        const text = item.textContent?.trim() || "";
+        if (/^Economy$/i.test(text) || /economy(?!.*basic)/i.test(text)) {
+          (item as HTMLElement).click();
+          return `selected: "${text}"`;
+        }
+      }
+      return null;
     });
-    log(`Bag-related buttons: ${JSON.stringify(allButtons)}`);
-  }
-
-  // Close the popup
-  const closeBtn = page.locator('button:has-text("Done"), button:has-text("Close"), button[aria-label="Close"]').first();
-  if (await closeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await closeBtn.click();
+    log(`Selection result: ${selected || "no match"}`);
+    await page.waitForTimeout(2000);
   } else {
-    await page.keyboard.press("Escape");
+    log("Dropdown did not open");
   }
-  await page.waitForTimeout(2000);
-  log("Bags filter applied");
 }
 
 async function waitForResults(page: Page, debug = false): Promise<void> {

@@ -4,7 +4,9 @@ CLI tool (`google-flights`) that searches Google Flights and outputs structured 
 
 ## Stack
 
-Python 3.10+, swoop-flights (Google Flights RPC reverse-engineering), Click (CLI parsing).
+Python 3.10+, Click (CLI parsing), with two backend implementations:
+- **swoop-flights** (`search_swoop.py`) -- calls Google's internal RPC endpoints directly
+- **fast-flights** (`search_fast.py`) -- protobuf URL encoding + SSR HTML parsing
 
 ## Running
 
@@ -12,17 +14,22 @@ Python 3.10+, swoop-flights (Google Flights RPC reverse-engineering), Click (CLI
 # Activate venv
 source .venv/bin/activate
 
-# One-way search
-python search_flights.py --from SFO --to NRT --depart 2026-08-15
+# Primary (swoop) -- richer data: flight numbers, aircraft, legroom, carbon emissions, layovers
+python search_swoop.py --from SFO --to NRT --depart 2026-08-15
+
+# Alternative (fast-flights) -- more results, less metadata per flight
+python search_fast.py --from SFO --to NRT --depart 2026-08-15
 
 # Round-trip
-python search_flights.py --from JFK --to LHR --depart 2026-08-01 --return 2026-08-15
+python search_swoop.py --from JFK --to LHR --depart 2026-08-01 --return 2026-08-15
 
 # With filters
-python search_flights.py --from SFO --to NRT --depart 2026-08-15 --stops nonstop --sort price --class business
+python search_swoop.py --from SFO --to NRT --depart 2026-08-15 --stops nonstop --sort price --class business
 ```
 
 ## Options
+
+Both scripts share the same CLI interface:
 
 - `--from` / `--to`: Airport IATA codes (required)
 - `--depart`: Departure date YYYY-MM-DD (required)
@@ -37,12 +44,21 @@ python search_flights.py --from SFO --to NRT --depart 2026-08-15 --stops nonstop
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install swoop-flights click
+pip install swoop-flights fast-flights click
 ```
+
+## Backend Comparison
+
+| | swoop (`search_swoop.py`) | fast-flights (`search_fast.py`) |
+|---|---|---|
+| Approach | Direct RPC to GetShoppingResults | Protobuf URL + SSR HTML parse |
+| Data richness | Flight numbers, aircraft, legroom, carbon, layovers | Airline, price, times, duration, stops |
+| Rate-limit behavior | Returns empty `[]` | Returns price-only stubs (filtered out with warning) |
+| Basic economy | Excluded server-side | Included (no server-side filter) |
+| Business/first class | Full metadata | Incomplete metadata (v2.2 parsing limitation) |
 
 ## Notes
 
-- Basic economy fares are excluded by default (main cabin only).
-- swoop uses TLS fingerprint impersonation via primp -- no browser or API key needed.
-- Google may rate-limit after rapid successive calls; swoop retries with exponential backoff.
-- The old Playwright-based scraper (TypeScript in src/) is preserved but superseded by search_flights.py.
+- No browser or API key needed for either backend.
+- Google may rate-limit after rapid successive calls; wait a few minutes between searches.
+- The old Playwright-based scraper (TypeScript in src/) is preserved but superseded.

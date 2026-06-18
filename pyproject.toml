@@ -5,8 +5,10 @@ description = "CLI tool to search Google Flights and output results as JSON"
 requires-python = ">=3.10"
 dependencies = [
     "swoop-flights>=0.6.0",
+    "fast-flights>=2.2",
     "click>=8.0",
 ]
 
 [project.scripts]
-google-flights = "search_flights:main"
+google-flights = "search_swoop:main"
+google-flights-fast = "search_fast:main"
