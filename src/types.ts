@@ -13,7 +13,7 @@ export interface SearchInput {
 
 export type CabinClass = "economy" | "premium-economy" | "business" | "first";
 export type StopFilter = "any" | "nonstop" | "1stop";
-export type SortOption = "price" | "duration" | "departure" | "arrival";
+export type SortOption = "price" | "duration" | "departure" | "arrival" | "none";
 
 export interface FlightLeg {
   from: string;
