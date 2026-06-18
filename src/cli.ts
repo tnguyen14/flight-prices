@@ -16,6 +16,7 @@ program
   .option("--stops <filter>", "Stop filter: any|nonstop|1stop", "any")
   .option("--sort <by>", "Sort by: price|duration|departure|arrival", "price")
   .option("--headed", "Run browser in headed mode (visible) for debugging", false)
+  .option("--debug", "Dump raw element text to stderr for debugging parser", false)
   .parse();
 
 const opts = program.opts();
@@ -30,6 +31,7 @@ const input: SearchInput = {
   stops: opts.stops as StopFilter,
   sort: opts.sort as SortOption,
   headed: opts.headed,
+  debug: opts.debug,
 };
 
 async function main() {

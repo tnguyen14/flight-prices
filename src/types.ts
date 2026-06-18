@@ -8,6 +8,7 @@ export interface SearchInput {
   stops: StopFilter;
   sort: SortOption;
   headed: boolean;
+  debug: boolean;
 }
 
 export type CabinClass = "economy" | "premium-economy" | "business" | "first";
