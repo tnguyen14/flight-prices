@@ -43,6 +43,7 @@ const input: SearchInput = {
   sort: opts.sort as SortOption,
   headed: opts.headed,
   debug: opts.debug,
+  noBasicEconomy: true,
 };
 
 async function main() {

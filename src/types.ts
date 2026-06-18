@@ -9,6 +9,7 @@ export interface SearchInput {
   sort: SortOption;
   headed: boolean;
   debug: boolean;
+  noBasicEconomy: boolean;
 }
 
 export type CabinClass = "economy" | "premium-economy" | "business" | "first";
