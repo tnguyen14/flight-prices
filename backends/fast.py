@@ -11,7 +11,7 @@ FLIGHTS_URL = "https://www.google.com/travel/flights"
 
 
 def _fetch(query, debug=False):
-    """Fetch and parse flights from Google."""
+    """Fetch and parse flights from Google. Returns (result, error_hint)."""
     client = Client(impersonate="chrome", impersonate_os="macos", referer=True, cookie_store=True)
 
     res = client.get(FLIGHTS_URL, params=query.params())
@@ -28,12 +28,16 @@ def _fetch(query, debug=False):
         client.get("https://consent.google.com/save?continue=https://www.google.com/&gl=US&m=0&pc=trv&x=5&src=2&hl=en&bl=gws_20240101-0&set_eom=true")
         res = client.get(FLIGHTS_URL, params=query.params())
 
+    has_flight_data = 'ds:1' in res.text
+
     try:
-        return parse(res.text)
+        return parse(res.text), None
     except (FlightsNotFound, RuntimeError, AttributeError) as e:
         if debug:
             sys.stderr.write(f"[debug] parse failed: {type(e).__name__}: {str(e)[:100]}\n")
-        return None
+        if not has_flight_data:
+            return None, "Google did not return flight data. This may be a temporary block — try again shortly."
+        return None, None
 
 
 def search_flights(origin, destination, depart, return_date, passengers, cabin, stops, sort_by, debug=False, **kwargs):
@@ -62,8 +66,10 @@ def search_flights(origin, destination, depart, return_date, passengers, cabin, 
         seat=cabin,
     )
 
-    result = _fetch(query, debug=debug)
+    result, error_hint = _fetch(query, debug=debug)
     if result is None:
+        if error_hint:
+            sys.stderr.write(f"{error_hint}\n")
         return []
 
     from backends._fmt import fmt_time_list, fmt_date_list

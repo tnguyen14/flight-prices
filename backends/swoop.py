@@ -11,6 +11,7 @@ from swoop import (
     SORT_DURATION,
     SORT_TOP,
 )
+from swoop.rpc import search_raw
 
 SORT_MAP = {
     "price": SORT_CHEAPEST,
@@ -40,6 +41,9 @@ def search_flights(origin, destination, depart, return_date, passengers, cabin, 
         sys.exit(1)
 
     if not results.results:
+        raw = search_raw(origin, destination, depart, passengers=Passengers(adults=passengers))
+        if raw is None:
+            sys.stderr.write("Google did not return flight data. This may be a temporary block — try again shortly.\n")
         return []
 
     from backends._fmt import fmt_time_tuple, fmt_date_tuple
