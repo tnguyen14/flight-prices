@@ -41,6 +41,10 @@ def search_flights(origin, destination, depart, return_date, passengers, cabin, 
         sys.exit(1)
 
     if not results.results:
+        # search() returns an empty SearchResult both when no flights exist
+        # and when Google responds with an ErrorResponse (a soft block).
+        # search_raw() distinguishes: it returns None on ErrorResponse,
+        # or a RawSearchResult (possibly with 0 itineraries) on a valid response.
         raw = search_raw(origin, destination, depart, passengers=Passengers(adults=passengers))
         if raw is None:
             sys.stderr.write("Google did not return flight data. This may be a temporary block — try again shortly.\n")
