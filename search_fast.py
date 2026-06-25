@@ -1,31 +1,20 @@
 #!/usr/bin/env python3
-"""CLI tool to search Google Flights using fast-flights and output results as JSON.
+"""CLI tool to search Google Flights using fast-flights v3 and output results as JSON.
 
-Alternative implementation to search_flights.py (swoop). Uses protobuf URL
-encoding + SSR HTML parsing instead of direct RPC calls. May return more
-results but with less metadata per flight.
+Uses protobuf URL encoding + SSR HTML parsing instead of direct RPC calls.
+More reliable than the RPC approach (search_swoop.py) since Google serves
+flight data in the initial HTML render.
 """
 
 import json
-import re
 import sys
 import time
 
 import click
-import fast_flights.core
-from fast_flights import FlightData, Passengers, get_flights
+from fast_flights import FlightQuery, Passengers, create_filter
+from fast_flights.exceptions import FlightsNotFound
+from fast_flights.parser import parse
 from primp import Client
-
-
-def _fetch_with_working_profile(params: dict):
-    client = Client(impersonate="chrome", verify=False)
-    res = client.get("https://www.google.com/travel/flights", params=params)
-    assert res.status_code == 200, f"{res.status_code} Result: {res.text_markdown}"
-    return res
-
-
-fast_flights.core.fetch = _fetch_with_working_profile
-
 
 STOPS_MAP = {
     "any": None,
@@ -33,54 +22,51 @@ STOPS_MAP = {
     "1stop": 1,
 }
 
-
-def parse_price(price_str: str) -> tuple[int | None, str]:
-    """Parse price string like '$55' or '€120' into (amount, currency)."""
-    if not price_str:
-        return None, "USD"
-    m = re.match(r'([£€$¥])?\s*([\d,]+)', price_str.strip())
-    if not m:
-        return None, "USD"
-    symbol = m.group(1) or "$"
-    amount = int(m.group(2).replace(",", ""))
-    currency_map = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY"}
-    return amount, currency_map.get(symbol, "USD")
+FLIGHTS_URL = "https://www.google.com/travel/flights"
 
 
-def parse_duration(duration_str: str) -> int:
-    """Parse duration string like '1 hr 29 min' or '14 hr 5 min' into minutes."""
-    if not duration_str:
-        return 0
-    total = 0
-    hr_match = re.search(r'(\d+)\s*hr', duration_str)
-    min_match = re.search(r'(\d+)\s*min', duration_str)
-    if hr_match:
-        total += int(hr_match.group(1)) * 60
-    if min_match:
-        total += int(min_match.group(1))
-    return total
+def fetch_flights(query, max_retries=5):
+    """Fetch and parse flights with retry on rate-limiting."""
+    client = Client(impersonate="chrome", impersonate_os="macos", referer=True, cookie_store=True)
+
+    for attempt in range(max_retries):
+        res = client.get(FLIGHTS_URL, params=query.params())
+        try:
+            return parse(res.text)
+        except (FlightsNotFound, RuntimeError, AttributeError):
+            if attempt < max_retries - 1:
+                delay = 5 * (attempt + 1)
+                sys.stderr.write(f"No flights in response (rate-limited by Google), retrying in {delay}s... ({attempt + 1}/{max_retries})\n")
+                time.sleep(delay)
+
+    sys.stderr.write("No results after retries. Google may be rate-limiting this IP.\n")
+    return None
 
 
-def parse_time(time_str: str) -> str:
-    """Extract just the time portion like '10:15 AM' from strings like '10:15 AM on Wed, Jul 15'."""
-    m = re.match(r'(\d{1,2}:\d{2}\s*[AP]M)', time_str.strip())
-    return m.group(1) if m else time_str.strip()
+def fmt_time(t) -> str:
+    """Format (hour, minute) list as 'H:MM AM/PM'."""
+    if not t:
+        return "N/A"
+    h = t[0] if t[0] is not None else 0
+    m = t[1] if len(t) > 1 and t[1] is not None else 0
+    if h == 0:
+        return f"12:{m:02d} AM"
+    elif h < 12:
+        return f"{h}:{m:02d} AM"
+    elif h == 12:
+        return f"12:{m:02d} PM"
+    else:
+        return f"{h - 12}:{m:02d} PM"
 
 
-def parse_stops(stops_val) -> int:
-    """Parse stops value which may be int or string."""
-    if isinstance(stops_val, int):
-        return stops_val
-    if isinstance(stops_val, str):
-        if stops_val.lower() in ("nonstop", "unknown"):
-            return 0
-        m = re.search(r'(\d+)', stops_val)
-        return int(m.group(1)) if m else 0
-    return 0
+def fmt_date(d: tuple[int, int, int]) -> str:
+    """Format (year, month, day) tuple as 'YYYY-MM-DD'."""
+    return f"{d[0]:04d}-{d[1]:02d}-{d[2]:02d}"
 
 
-def _time_to_minutes(time_str: str) -> int:
-    """Convert '10:15 AM' to minutes since midnight for sorting."""
+def time_to_minutes(time_str: str) -> int:
+    """Convert 'H:MM AM/PM' to minutes since midnight for sorting."""
+    import re
     m = re.match(r'(\d{1,2}):(\d{2})\s*(AM|PM)', time_str, re.IGNORECASE)
     if not m:
         return 0
@@ -105,7 +91,7 @@ def _time_to_minutes(time_str: str) -> int:
 @click.option("--sort", "sort_by", default="departure", type=click.Choice(["price", "departure", "arrival", "duration", "none"]))
 def main(origin, destination, depart, return_date, passengers, cabin, stops, sort_by):
     """Search Google Flights and output results as JSON (fast-flights backend)."""
-    flight_data = [FlightData(
+    flights = [FlightQuery(
         date=depart,
         from_airport=origin.upper(),
         to_airport=destination.upper(),
@@ -113,7 +99,7 @@ def main(origin, destination, depart, return_date, passengers, cabin, stops, sor
     )]
 
     if return_date:
-        flight_data.append(FlightData(
+        flights.append(FlightQuery(
             date=return_date,
             from_airport=destination.upper(),
             to_airport=origin.upper(),
@@ -122,60 +108,50 @@ def main(origin, destination, depart, return_date, passengers, cabin, stops, sor
 
     trip_type = "round-trip" if return_date else "one-way"
 
-    max_retries = 5
-    result = None
-    for attempt in range(max_retries):
-        try:
-            result = get_flights(
-                flight_data=flight_data,
-                trip=trip_type,
-                passengers=Passengers(adults=passengers),
-                seat=cabin,
-                max_stops=STOPS_MAP[stops],
-            )
-            break
-        except RuntimeError:
-            if attempt < max_retries - 1:
-                delay = 5 * (attempt + 1)
-                sys.stderr.write(f"No flights in response (rate-limited by Google), retrying in {delay}s... ({attempt + 1}/{max_retries})\n")
-                time.sleep(delay)
-        except Exception as e:
-            sys.stderr.write(f"Error: {e}\n")
-            sys.exit(1)
+    query = create_filter(
+        flights=flights,
+        trip=trip_type,
+        passengers=Passengers(adults=passengers),
+        seat=cabin,
+    )
 
+    result = fetch_flights(query)
     if result is None:
-        sys.stderr.write("No results after retries. Google may be rate-limiting this IP.\n")
         sys.stdout.write("[]\n")
         sys.exit(0)
 
     output = []
-    for flight in result.flights:
-        # Skip incomplete entries (rate-limited responses return price-only stubs)
-        if not flight.name and not flight.departure:
-            continue
-
-        price_amount, currency = parse_price(flight.price)
-        duration_minutes = parse_duration(flight.duration)
-        departure_time = parse_time(flight.departure)
-        arrival_time = parse_time(flight.arrival)
-        stop_count = parse_stops(flight.stops)
+    for group in result:
+        total_duration = sum(f.duration for f in group.flights)
+        stops_count = len(group.flights) - 1
 
         output.append({
-            "airline": flight.name,
-            "price": price_amount,
-            "currency": currency,
-            "departure": departure_time,
-            "arrival": arrival_time,
-            "duration_minutes": duration_minutes,
-            "stops": stop_count,
-            "is_best": flight.is_best,
-            "delay": flight.delay,
-            "arrival_time_ahead": flight.arrival_time_ahead or None,
+            "airline": ", ".join(group.airlines),
+            "price": group.price,
+            "currency": "USD",
+            "departure": fmt_time(group.flights[0].departure.time),
+            "arrival": fmt_time(group.flights[-1].arrival.time),
+            "departure_date": fmt_date(group.flights[0].departure.date),
+            "arrival_date": fmt_date(group.flights[-1].arrival.date),
+            "duration_minutes": total_duration,
+            "stops": stops_count,
+            "legs": [
+                {
+                    "from": f.from_airport.code,
+                    "to": f.to_airport.code,
+                    "airline": group.airlines[0] if group.airlines else "Unknown",
+                    "aircraft": f.plane_type or None,
+                    "departure": fmt_time(f.departure.time),
+                    "arrival": fmt_time(f.arrival.time),
+                    "duration_minutes": f.duration,
+                }
+                for f in group.flights
+            ],
+            "carbon_emissions": {
+                "grams": group.carbon.emission,
+                "typical_grams": group.carbon.typical_on_route,
+            } if group.carbon else None,
         })
-
-    # Warn if we got results but all were incomplete (rate-limited)
-    if not output and result.flights:
-        sys.stderr.write("Warning: Got price-only stubs (likely rate-limited by Google). Try again in a few minutes.\n")
 
     # Sort results
     if sort_by == "price":
@@ -183,9 +159,9 @@ def main(origin, destination, depart, return_date, passengers, cabin, stops, sor
     elif sort_by == "duration":
         output.sort(key=lambda x: x["duration_minutes"])
     elif sort_by == "departure":
-        output.sort(key=lambda x: _time_to_minutes(x["departure"]))
+        output.sort(key=lambda x: time_to_minutes(x["departure"]))
     elif sort_by == "arrival":
-        output.sort(key=lambda x: _time_to_minutes(x["arrival"]))
+        output.sort(key=lambda x: time_to_minutes(x["arrival"]))
 
     sys.stdout.write(json.dumps(output, indent=2) + "\n")
 
