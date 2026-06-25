@@ -85,7 +85,7 @@ def print_table(results):
 @click.option("--return", "return_date", default=None, help="Return date (YYYY-MM-DD); omit for one-way")
 @click.option("--passengers", default=1, type=int, help="Number of adult passengers")
 @click.option("--class", "cabin", default="economy", type=click.Choice(["economy", "premium-economy", "business", "first"]))
-@click.option("--stops", default="any", type=click.Choice(["any", "nonstop", "1stop"]))
+@click.option("--stops", default="nonstop", type=click.Choice(["any", "nonstop", "1stop"]))
 @click.option("--sort", "sort_by", default="departure", type=click.Choice(["price", "departure", "arrival", "duration", "none"]))
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON instead of table")
 @click.option("--debug", is_flag=True, help="Print debug info to stderr")
