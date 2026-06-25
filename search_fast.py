@@ -8,7 +8,6 @@ flight data in the initial HTML render.
 
 import json
 import sys
-import time
 
 import click
 from fast_flights import FlightQuery, Passengers, create_filter
@@ -24,23 +23,30 @@ STOPS_MAP = {
 
 FLIGHTS_URL = "https://www.google.com/travel/flights"
 
-
-def fetch_flights(query, max_retries=5):
-    """Fetch and parse flights with retry on rate-limiting."""
+def fetch_flights(query, debug=False):
+    """Fetch and parse flights from Google."""
     client = Client(impersonate="chrome", impersonate_os="macos", referer=True, cookie_store=True)
 
-    for attempt in range(max_retries):
-        res = client.get(FLIGHTS_URL, params=query.params())
-        try:
-            return parse(res.text)
-        except (FlightsNotFound, RuntimeError, AttributeError):
-            if attempt < max_retries - 1:
-                delay = 5 * (attempt + 1)
-                sys.stderr.write(f"No flights in response (rate-limited by Google), retrying in {delay}s... ({attempt + 1}/{max_retries})\n")
-                time.sleep(delay)
+    res = client.get(FLIGHTS_URL, params=query.params())
 
-    sys.stderr.write("No results after retries. Google may be rate-limiting this IP.\n")
-    return None
+    if debug:
+        sys.stderr.write(f"[debug] status={res.status_code} length={len(res.text)}\n")
+        if 'consent.google' in res.text:
+            sys.stderr.write(f"[debug] consent page detected\n")
+        if 'ds:1' in res.text:
+            sys.stderr.write(f"[debug] flight data script tag found\n")
+
+    if "consent.google" in res.text or "Before you continue" in res.text:
+        sys.stderr.write("Google consent page detected. Setting consent cookie...\n")
+        client.get("https://consent.google.com/save?continue=https://www.google.com/&gl=US&m=0&pc=trv&x=5&src=2&hl=en&bl=gws_20240101-0&set_eom=true")
+        res = client.get(FLIGHTS_URL, params=query.params())
+
+    try:
+        return parse(res.text)
+    except (FlightsNotFound, RuntimeError, AttributeError) as e:
+        if debug:
+            sys.stderr.write(f"[debug] parse failed: {type(e).__name__}: {str(e)[:100]}\n")
+        return None
 
 
 def fmt_time(t) -> str:
@@ -89,7 +95,8 @@ def time_to_minutes(time_str: str) -> int:
 @click.option("--class", "cabin", default="economy", type=click.Choice(["economy", "premium-economy", "business", "first"]))
 @click.option("--stops", default="any", type=click.Choice(["any", "nonstop", "1stop"]))
 @click.option("--sort", "sort_by", default="departure", type=click.Choice(["price", "departure", "arrival", "duration", "none"]))
-def main(origin, destination, depart, return_date, passengers, cabin, stops, sort_by):
+@click.option("--debug", is_flag=True, help="Print debug info to stderr")
+def main(origin, destination, depart, return_date, passengers, cabin, stops, sort_by, debug):
     """Search Google Flights and output results as JSON (fast-flights backend)."""
     flights = [FlightQuery(
         date=depart,
@@ -115,8 +122,9 @@ def main(origin, destination, depart, return_date, passengers, cabin, stops, sor
         seat=cabin,
     )
 
-    result = fetch_flights(query)
+    result = fetch_flights(query, debug=debug)
     if result is None:
+        sys.stderr.write("No results found.\n")
         sys.stdout.write("[]\n")
         sys.exit(0)
 
