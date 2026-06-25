@@ -60,7 +60,7 @@ def fmt_date(d: tuple[int, int, int]) -> str:
 @click.option("--sort", "sort_by", default="departure", type=click.Choice(["price", "departure", "arrival", "duration", "none"]))
 def main(origin, destination, depart, return_date, passengers, cabin, stops, sort_by):
     """Search Google Flights and output results as JSON."""
-    max_retries = 3
+    max_retries = 5
     results = None
     for attempt in range(max_retries):
         try:
@@ -82,9 +82,13 @@ def main(origin, destination, depart, return_date, passengers, cabin, stops, sor
         if results.results:
             break
         if attempt < max_retries - 1:
-            delay = 2 ** (attempt + 1)
-            sys.stderr.write(f"Empty response (rate-limited), retrying in {delay}s...\n")
+            delay = 5 * (attempt + 1)
+            sys.stderr.write(f"Empty response (rate-limited by Google), retrying in {delay}s... ({attempt + 1}/{max_retries})\n")
             time.sleep(delay)
+
+    if not results.results:
+        sys.stderr.write("No results after retries. Google may be rate-limiting this IP.\n")
+        sys.stderr.write("Tip: try search_fast.py which uses a different (more reliable) approach.\n")
 
     output = []
     for trip in results.results:

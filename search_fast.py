@@ -9,9 +9,22 @@ results but with less metadata per flight.
 import json
 import re
 import sys
+import time
 
 import click
+import fast_flights.core
 from fast_flights import FlightData, Passengers, get_flights
+from primp import Client
+
+
+def _fetch_with_working_profile(params: dict):
+    client = Client(impersonate="chrome", verify=False)
+    res = client.get("https://www.google.com/travel/flights", params=params)
+    assert res.status_code == 200, f"{res.status_code} Result: {res.text_markdown}"
+    return res
+
+
+fast_flights.core.fetch = _fetch_with_working_profile
 
 
 STOPS_MAP = {
@@ -92,34 +105,48 @@ def _time_to_minutes(time_str: str) -> int:
 @click.option("--sort", "sort_by", default="departure", type=click.Choice(["price", "departure", "arrival", "duration", "none"]))
 def main(origin, destination, depart, return_date, passengers, cabin, stops, sort_by):
     """Search Google Flights and output results as JSON (fast-flights backend)."""
-    try:
-        flight_data = [FlightData(
-            date=depart,
-            from_airport=origin.upper(),
-            to_airport=destination.upper(),
-            max_stops=STOPS_MAP[stops],
-        )]
+    flight_data = [FlightData(
+        date=depart,
+        from_airport=origin.upper(),
+        to_airport=destination.upper(),
+        max_stops=STOPS_MAP[stops],
+    )]
 
-        if return_date:
-            flight_data.append(FlightData(
-                date=return_date,
-                from_airport=destination.upper(),
-                to_airport=origin.upper(),
+    if return_date:
+        flight_data.append(FlightData(
+            date=return_date,
+            from_airport=destination.upper(),
+            to_airport=origin.upper(),
+            max_stops=STOPS_MAP[stops],
+        ))
+
+    trip_type = "round-trip" if return_date else "one-way"
+
+    max_retries = 5
+    result = None
+    for attempt in range(max_retries):
+        try:
+            result = get_flights(
+                flight_data=flight_data,
+                trip=trip_type,
+                passengers=Passengers(adults=passengers),
+                seat=cabin,
                 max_stops=STOPS_MAP[stops],
-            ))
+            )
+            break
+        except RuntimeError:
+            if attempt < max_retries - 1:
+                delay = 5 * (attempt + 1)
+                sys.stderr.write(f"No flights in response (rate-limited by Google), retrying in {delay}s... ({attempt + 1}/{max_retries})\n")
+                time.sleep(delay)
+        except Exception as e:
+            sys.stderr.write(f"Error: {e}\n")
+            sys.exit(1)
 
-        trip_type = "round-trip" if return_date else "one-way"
-
-        result = get_flights(
-            flight_data=flight_data,
-            trip=trip_type,
-            passengers=Passengers(adults=passengers),
-            seat=cabin,
-            max_stops=STOPS_MAP[stops],
-        )
-    except Exception as e:
-        sys.stderr.write(f"Error: {e}\n")
-        sys.exit(1)
+    if result is None:
+        sys.stderr.write("No results after retries. Google may be rate-limiting this IP.\n")
+        sys.stdout.write("[]\n")
+        sys.exit(0)
 
     output = []
     for flight in result.flights:
