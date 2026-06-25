@@ -6,7 +6,7 @@ import sys
 
 import click
 
-from backends._fmt import time_to_minutes
+from libraries._fmt import time_to_minutes
 
 STOPS_MAP = {
     "any": None,
@@ -16,7 +16,7 @@ STOPS_MAP = {
 
 
 @click.command()
-@click.option("--backend", required=True, type=click.Choice(["swoop", "fast"]), help="Search backend to use")
+@click.option("--library", required=True, type=click.Choice(["swoop", "fast"]), help="Library to use for fetching flights")
 @click.option("--from", "origin", required=True, help="Origin airport IATA code (e.g., SFO)")
 @click.option("--to", "destination", required=True, help="Destination airport IATA code (e.g., NRT)")
 @click.option("--depart", required=True, help="Departure date (YYYY-MM-DD)")
@@ -26,12 +26,12 @@ STOPS_MAP = {
 @click.option("--stops", default="any", type=click.Choice(["any", "nonstop", "1stop"]))
 @click.option("--sort", "sort_by", default="departure", type=click.Choice(["price", "departure", "arrival", "duration", "none"]))
 @click.option("--debug", is_flag=True, help="Print debug info to stderr")
-def main(backend, origin, destination, depart, return_date, passengers, cabin, stops, sort_by, debug):
+def main(library, origin, destination, depart, return_date, passengers, cabin, stops, sort_by, debug):
     """Search Google Flights and output results as JSON."""
-    if backend == "swoop":
-        from backends.swoop import search_flights
+    if library == "swoop":
+        from libraries.swoop import search_flights
     else:
-        from backends.fast import search_flights
+        from libraries.fast import search_flights
 
     output = search_flights(
         origin=origin.upper(),

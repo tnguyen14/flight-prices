@@ -15,24 +15,24 @@ Python 3.10+, Click (CLI parsing), with two backend implementations:
 source .venv/bin/activate
 
 # Using swoop backend -- richer data: flight numbers, aircraft, legroom, carbon emissions, layovers
-python search.py --backend swoop --from SFO --to NRT --depart 2026-08-15
+python search.py --library swoop --from SFO --to NRT --depart 2026-08-15
 
 # Using fast backend -- more results, less metadata per flight
-python search.py --backend fast --from SFO --to NRT --depart 2026-08-15
+python search.py --library fast --from SFO --to NRT --depart 2026-08-15
 
 # Round-trip
-python search.py --backend swoop --from JFK --to LHR --depart 2026-08-01 --return 2026-08-15
+python search.py --library swoop --from JFK --to LHR --depart 2026-08-01 --return 2026-08-15
 
 # With filters
-python search.py --backend fast --from SFO --to NRT --depart 2026-08-15 --stops nonstop --sort price --class business
+python search.py --library fast --from SFO --to NRT --depart 2026-08-15 --stops nonstop --sort price --class business
 
 # Debug mode (fast backend only)
-python search.py --backend fast --from SFO --to NRT --depart 2026-08-15 --debug
+python search.py --library fast --from SFO --to NRT --depart 2026-08-15 --debug
 ```
 
 ## Options
 
-- `--backend`: swoop | fast (required)
+- `--library`: swoop | fast (required)
 - `--from` / `--to`: Airport IATA codes (required)
 - `--depart`: Departure date YYYY-MM-DD (required)
 - `--return`: Return date for round-trip (optional)
