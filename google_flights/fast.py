@@ -72,7 +72,7 @@ def search_flights(origin, destination, depart, return_date, passengers, cabin, 
             sys.stderr.write(f"{error_hint}\n")
         return []
 
-    from libraries._fmt import fmt_time_list, fmt_date_list
+    from google_flights._fmt import fmt_time_list, fmt_date_list
 
     output = []
     for group in result:

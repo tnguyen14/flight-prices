@@ -6,7 +6,7 @@ import sys
 
 import click
 
-from libraries._fmt import time_to_minutes
+from google_flights._fmt import time_to_minutes
 
 STOPS_MAP = {
     "any": None,
@@ -29,9 +29,9 @@ STOPS_MAP = {
 def main(library, origin, destination, depart, return_date, passengers, cabin, stops, sort_by, debug):
     """Search Google Flights and output results as JSON."""
     if library == "swoop":
-        from libraries.swoop import search_flights
+        from google_flights.swoop import search_flights
     else:
-        from libraries.fast import search_flights
+        from google_flights.fast import search_flights
 
     output = search_flights(
         origin=origin.upper(),
